@@ -155,7 +155,12 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      const itemRefund = reqItem.quantity * saleItem.unitPrice
+      // Effective price actually paid per unit after discounts:
+      const effectiveUnitPrice = saleItem.quantity > 0
+        ? (saleItem.totalAmount / saleItem.quantity)
+        : saleItem.unitPrice
+
+      const itemRefund = Math.round(reqItem.quantity * effectiveUnitPrice)
       totalRefundAmount += itemRefund
 
       returnItemsToCreate.push({
@@ -163,14 +168,18 @@ export async function POST(request: NextRequest) {
         variantId: saleItem.variantId,
         productName: saleItem.productName,
         quantity: reqItem.quantity,
-        unitPrice: saleItem.unitPrice,
+        unitPrice: effectiveUnitPrice,
         totalAmount: itemRefund,
         isDamaged: reqItem.isDamaged,
       })
     }
 
+    // Ensure refund does not exceed the remaining refundable amount on the sale
+    const alreadyRefundedTotal = sale.returns.reduce((sum, r) => sum + r.totalAmount, 0)
+    const maxRefundable = Math.max(0, sale.totalAmount - alreadyRefundedTotal)
+    const grossRefundAmount = Math.min(totalRefundAmount, maxRefundable)
+
     // Apply Deduction Amount (Katoti / restocking fee)
-    const grossRefundAmount = totalRefundAmount
     const deduction = Math.min(grossRefundAmount, Math.max(0, data.deductionAmount || 0))
     const netRefundAmount = Math.max(0, grossRefundAmount - deduction)
     const finalReason = deduction > 0

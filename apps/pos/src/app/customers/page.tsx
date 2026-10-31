@@ -122,7 +122,8 @@ export default function CustomersPage() {
 
   const grossReturnAmount = selectedReturnItems.reduce((sum, item) => {
     const qty = returnSelections[item.id]?.quantity ?? 0
-    return sum + (qty * item.unitPrice)
+    const effectiveUnitPrice = item.quantity > 0 ? (item.totalAmount / item.quantity) : item.unitPrice
+    return sum + (qty * effectiveUnitPrice)
   }, 0)
 
   const effectiveCustomerDeduction = Math.min(grossReturnAmount, Math.max(0, returnDeduction || 0))
@@ -757,14 +758,19 @@ export default function CustomersPage() {
                             />
                             <div>
                               <div className="font-bold text-slate-900">{item.productName}</div>
-                              <div className="text-[11px] text-slate-400 font-mono">
-                                Purchased: {item.quantity} units @ {formatCurrency(item.unitPrice)}
+                              <div className="text-[11px] text-slate-500 font-mono">
+                                Purchased @ {formatCurrency(item.quantity > 0 ? (item.totalAmount / item.quantity) : item.unitPrice)}
+                                {item.quantity > 0 && (item.totalAmount / item.quantity) < item.unitPrice && (
+                                  <span className="text-emerald-700 font-semibold ml-1.5">
+                                    (Discounted from {formatCurrency(item.unitPrice)})
+                                  </span>
+                                )}
                                 {item.imei && ` • IMEI: ${item.imei}`}
                               </div>
                             </div>
                           </label>
                           <div className="font-bold text-slate-800 text-right">
-                            {formatCurrency(sel.quantity * item.unitPrice)}
+                            {formatCurrency(sel.quantity * (item.quantity > 0 ? (item.totalAmount / item.quantity) : item.unitPrice))}
                           </div>
                         </div>
 

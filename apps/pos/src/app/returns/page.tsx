@@ -166,7 +166,8 @@ export default function ReturnsPage() {
 
   const grossRefund = selectedItemsToReturn.reduce((sum, item) => {
     const qty = returnSelections[item.id]?.quantity ?? 0
-    return sum + (qty * item.unitPrice)
+    const effectiveUnitPrice = item.quantity > 0 ? (item.totalAmount / item.quantity) : item.unitPrice
+    return sum + (qty * effectiveUnitPrice)
   }, 0)
 
   const effectiveDeduction = Math.min(grossRefund, Math.max(0, deductionAmount || 0))
@@ -354,14 +355,19 @@ export default function ReturnsPage() {
                           />
                           <div>
                             <div className="font-bold text-slate-900 text-xs">{item.productName}</div>
-                            <div className="text-[11px] text-slate-400 font-mono">
-                              {item.sku} • Sold: {item.quantity} units @ {formatCurrency(item.unitPrice)}
+                            <div className="text-[11px] text-slate-500 font-mono">
+                              {item.sku} • Sold @ {formatCurrency(item.quantity > 0 ? (item.totalAmount / item.quantity) : item.unitPrice)}
+                              {item.quantity > 0 && (item.totalAmount / item.quantity) < item.unitPrice && (
+                                <span className="text-emerald-700 font-semibold ml-1.5">
+                                  (Discounted from {formatCurrency(item.unitPrice)})
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
 
                         <div className="font-bold text-slate-800 text-xs">
-                          {formatCurrency(sel.quantity * item.unitPrice)}
+                          {formatCurrency(sel.quantity * (item.quantity > 0 ? (item.totalAmount / item.quantity) : item.unitPrice))}
                         </div>
                       </div>
 

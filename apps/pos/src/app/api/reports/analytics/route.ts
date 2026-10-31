@@ -166,9 +166,11 @@ export async function GET(request: NextRequest) {
       ORDER BY revenue DESC
     `
 
-    const revenue = salesAggregate._sum.totalAmount ?? 0
+    const grossRevenue = salesAggregate._sum.totalAmount ?? 0
+    const totalReturnsAmt = returnStats._sum.totalAmount ?? 0
+    const revenue = Math.max(0, grossRevenue - totalReturnsAmt)
     const cost = salesAggregate._sum.unitCost ?? 0
-    const grossProfit = revenue - cost
+    const grossProfit = Math.max(0, revenue - cost)
     const totalExpenses = expensesAggregate._sum.amount ?? 0
     const netProfit = grossProfit - totalExpenses
 

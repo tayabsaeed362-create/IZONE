@@ -236,9 +236,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── 3. Calculate Totals ────────────────────────────────────
+    // ── 3. Calculate Totals & Distribute Order Discount to Items ────
     const subtotal = validatedItems.reduce((sum, i) => sum + i.totalAmount, 0)
     const totalAmount = Math.max(0, subtotal - data.discountAmount + data.taxAmount)
+
+    // Distribute order discount proportionally to each item so sale_items store net paid price!
+    if (data.discountAmount > 0 && subtotal > 0) {
+      let allocatedDiscountSoFar = 0
+      for (let idx = 0; idx < validatedItems.length; idx++) {
+        const item = validatedItems[idx]
+        const isLast = idx === validatedItems.length - 1
+        const itemShare = isLast
+          ? Math.max(0, data.discountAmount - allocatedDiscountSoFar)
+          : Math.round((item.totalAmount / subtotal) * data.discountAmount)
+
+        allocatedDiscountSoFar += itemShare
+        item.discountAmount += itemShare
+        item.totalAmount = Math.max(0, item.totalAmount - itemShare)
+      }
+    }
 
     // Verify payments cover total
     const totalPaid = data.payments.reduce((sum, p) => sum + p.amount, 0)
