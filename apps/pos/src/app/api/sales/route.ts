@@ -536,6 +536,8 @@ export async function GET(request: NextRequest) {
           items: {
             select: {
               id: true,
+              productId: true,
+              variantId: true,
               productName: true,
               sku: true,
               quantity: true,
@@ -543,9 +545,15 @@ export async function GET(request: NextRequest) {
               ...(isOwner ? { unitCost: true } : {}),
               discountAmount: true,
               totalAmount: true,
+              imei: true,
             },
           },
           payments: true,
+          returns: {
+            include: {
+              items: true,
+            },
+          },
         },
         orderBy: { saleAt: 'desc' },
         skip: (page - 1) * limit,

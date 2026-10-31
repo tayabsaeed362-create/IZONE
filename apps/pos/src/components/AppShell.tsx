@@ -18,7 +18,6 @@ const links: NavLink[] = [
   { href: '/pos', label: 'Point of sale', icon: ShoppingBag },
   { href: '/inventory', label: 'Inventory', icon: Package },
   { href: '/sales', label: 'Sales', icon: Receipt },
-  { href: '/customers', label: 'Customers', icon: Users },
   { href: '/reports', label: 'Reports', icon: BarChart3, ownerOnly: true },
   { href: '/purchases', label: 'Purchases', icon: Truck },
   { href: '/suppliers', label: 'Suppliers', icon: Store, ownerOnly: true },
