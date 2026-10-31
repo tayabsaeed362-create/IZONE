@@ -13,28 +13,29 @@ export async function GET(request: NextRequest) {
     const { start, end } = getDateRange(period)
 
     const [
-      salesStats,
+      periodSales,
       salesCostStats,
-      todaySaleCount,
       totalProducts,
       lowStockProducts,
       totalCustomers,
       expenses,
-      periodReturns,
       topProducts,
       salesTrend,
       categoryBreakdown,
     ] = await Promise.all([
-      // Sales revenue from sales table (accurately reflects discounts applied at invoice/sale level)
-      prisma.sale.aggregate({
+      // Sales in period (accurately includes order discounts and sale-specific partial returns)
+      prisma.sale.findMany({
         where: {
           status: { in: ['COMPLETED', 'PARTIAL_REFUND'] },
           saleAt: { gte: start, lte: end },
         },
-        _sum: {
+        select: {
+          id: true,
           totalAmount: true,
+          returns: {
+            select: { totalAmount: true },
+          },
         },
-        _count: { id: true },
       }),
 
       // Cost stats for profit calculation
@@ -50,14 +51,6 @@ export async function GET(request: NextRequest) {
         },
       }),
 
-      // Transaction count
-      prisma.sale.count({
-        where: {
-          status: { in: ['COMPLETED', 'PARTIAL_REFUND'] },
-          saleAt: { gte: start, lte: end },
-        },
-      }),
-
       // Total active products
       prisma.product.count({ where: { status: 'ACTIVE' } }),
 
@@ -66,7 +59,6 @@ export async function GET(request: NextRequest) {
         where: {
           status: 'ACTIVE',
           quantity: { gt: 0 },
-          // Products where quantity <= minStockLevel
         },
       }),
 
@@ -77,12 +69,6 @@ export async function GET(request: NextRequest) {
       prisma.expense.aggregate({
         where: { expenseAt: { gte: start, lte: end } },
         _sum: { amount: true },
-      }),
-
-      // Returns in period
-      prisma.return.aggregate({
-        where: { createdAt: { gte: start, lte: end } },
-        _sum: { totalAmount: true },
       }),
 
       // Top selling products
@@ -99,14 +85,19 @@ export async function GET(request: NextRequest) {
       // Daily sales trend (last 7 days)
       prisma.$queryRaw<Array<{ date: string; revenue: number; count: number }>>`
         SELECT 
-          DATE_TRUNC('day', "saleAt")::date::text as date,
-          COALESCE(SUM("totalAmount"), 0)::float as revenue,
-          COUNT(*)::int as count
-        FROM sales
-        WHERE status IN ('COMPLETED', 'PARTIAL_REFUND')
-          AND "saleAt" >= ${start}
-          AND "saleAt" <= ${end}
-        GROUP BY DATE_TRUNC('day', "saleAt")
+          DATE_TRUNC('day', s."saleAt")::date::text as date,
+          COALESCE(SUM(s."totalAmount" - COALESCE(ret.total_refunded, 0)), 0)::float as revenue,
+          COUNT(s.id)::int as count
+        FROM sales s
+        LEFT JOIN (
+          SELECT "saleId", SUM("totalAmount") as total_refunded
+          FROM returns
+          GROUP BY "saleId"
+        ) ret ON ret."saleId" = s.id
+        WHERE s.status IN ('COMPLETED', 'PARTIAL_REFUND')
+          AND s."saleAt" >= ${start}
+          AND s."saleAt" <= ${end}
+        GROUP BY DATE_TRUNC('day', s."saleAt")
         ORDER BY date ASC
       `,
 
@@ -134,7 +125,6 @@ export async function GET(request: NextRequest) {
     const [
       monthlySales,
       monthlyCostStats,
-      monthlyReturnsData,
       monthlyExpensesData,
       inventoryValuation,
       pendingSync,
@@ -142,13 +132,18 @@ export async function GET(request: NextRequest) {
       lowStockWatchlist,
       categoryDistribution,
     ] = await Promise.all([
-      prisma.sale.aggregate({
+      prisma.sale.findMany({
         where: {
           status: { in: ['COMPLETED', 'PARTIAL_REFUND'] },
           saleAt: { gte: monthStart, lte: monthEnd },
         },
-        _sum: { totalAmount: true },
-        _count: { id: true },
+        select: {
+          id: true,
+          totalAmount: true,
+          returns: {
+            select: { totalAmount: true },
+          },
+        },
       }),
       prisma.saleItem.aggregate({
         where: {
@@ -158,10 +153,6 @@ export async function GET(request: NextRequest) {
           },
         },
         _sum: { unitCost: true },
-      }),
-      prisma.return.aggregate({
-        where: { createdAt: { gte: monthStart, lte: monthEnd } },
-        _sum: { totalAmount: true },
       }),
       prisma.expense.aggregate({
         where: { expenseAt: { gte: monthStart, lte: monthEnd } },
@@ -215,17 +206,22 @@ export async function GET(request: NextRequest) {
       `,
     ])
 
-    const grossRevenue = salesStats._sum.totalAmount ?? 0
-    const returnsTotal = periodReturns._sum.totalAmount ?? 0
-    const totalRevenue = Math.max(0, grossRevenue - returnsTotal)
+    // Calculate actual net revenue (Sale Total - returns on that sale)
+    const totalRevenue = periodSales.reduce((sum, s) => {
+      const returnsOnSale = s.returns.reduce((rSum, r) => rSum + r.totalAmount, 0)
+      return sum + Math.max(0, s.totalAmount - returnsOnSale)
+    }, 0)
+    const todaySaleCount = periodSales.length
+
     const totalCost = salesCostStats._sum.unitCost ?? 0
     const grossProfit = Math.max(0, totalRevenue - totalCost)
     const periodExpenses = expenses._sum.amount ?? 0
     const estimatedNetProfit = grossProfit - periodExpenses
 
-    const monthlyGrossRevenue = monthlySales._sum.totalAmount ?? 0
-    const monthlyReturns = monthlyReturnsData._sum.totalAmount ?? 0
-    const monthlyRevenue = Math.max(0, monthlyGrossRevenue - monthlyReturns)
+    const monthlyRevenue = monthlySales.reduce((sum, s) => {
+      const returnsOnSale = s.returns.reduce((rSum, r) => rSum + r.totalAmount, 0)
+      return sum + Math.max(0, s.totalAmount - returnsOnSale)
+    }, 0)
     const monthlyCost = monthlyCostStats._sum.unitCost ?? 0
     const monthlyGrossProfit = Math.max(0, monthlyRevenue - monthlyCost)
     const monthlyExpenses = monthlyExpensesData._sum.amount ?? 0
