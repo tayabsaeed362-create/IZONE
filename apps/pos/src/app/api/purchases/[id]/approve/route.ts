@@ -144,6 +144,9 @@ export async function POST(
       })
 
       return updatedPurchase
+    }, {
+      maxWait: 15000,
+      timeout: 45000,
     })
 
     return NextResponse.json(apiSuccess(approved, 'Purchase order approved successfully! Inventory stock has been intaken.'), { status: 200 })

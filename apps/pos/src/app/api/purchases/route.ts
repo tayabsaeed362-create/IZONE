@@ -197,6 +197,9 @@ export async function POST(request: NextRequest) {
       }
 
       return purchase
+    }, {
+      maxWait: 15000,
+      timeout: 45000,
     })
 
     const msg = isOwner

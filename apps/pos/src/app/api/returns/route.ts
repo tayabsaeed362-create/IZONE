@@ -286,6 +286,9 @@ export async function POST(request: NextRequest) {
       })
 
       return createdReturn
+    }, {
+      maxWait: 15000,
+      timeout: 45000,
     })
 
     return NextResponse.json(

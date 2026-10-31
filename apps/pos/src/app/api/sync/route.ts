@@ -390,6 +390,9 @@ async function processSaleSync(
     }
 
     return sale
+  }, {
+    maxWait: 15000,
+    timeout: 45000,
   })
 
   return {
@@ -460,6 +463,9 @@ async function processReturnSync(
       })
     }
     return ret
+  }, {
+    maxWait: 15000,
+    timeout: 45000,
   })
 
   return { returnId: ret.id }
@@ -505,6 +511,9 @@ async function processAdjustmentSync(
         createdBy: userId,
       },
     })
+  }, {
+    maxWait: 15000,
+    timeout: 45000,
   })
 
   return { newQuantity: newQty }

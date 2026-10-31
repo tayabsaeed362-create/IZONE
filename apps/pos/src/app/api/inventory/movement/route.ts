@@ -130,6 +130,9 @@ export async function POST(request: NextRequest) {
         variant: updatedVariant,
         movement,
       }
+    }, {
+      maxWait: 15000,
+      timeout: 45000,
     })
 
     return NextResponse.json(apiSuccess(result), { status: 201 })

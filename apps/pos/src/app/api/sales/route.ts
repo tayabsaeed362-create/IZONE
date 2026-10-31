@@ -249,171 +249,177 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // ── 4. Atomic Prisma Transaction ──────────────────────────
-    const sale = await prisma.$transaction(async (tx) => {
-      // Generate next human-readable invoice identifier
-      const saleCount = await tx.sale.count()
-      const saleNumber = getSaleNumber(saleCount + 1)
+    // Generate next human-readable invoice identifier
+    const saleCount = await prisma.sale.count()
+    const saleNumber = getSaleNumber(saleCount + 1)
 
-      // Resolve or automatically create customer if phone/name provided
-      let resolvedCustomerId = data.customerId
-      if (!resolvedCustomerId && (data.customerPhone?.trim() || data.customerName?.trim())) {
-        const phone = data.customerPhone?.trim() || null
-        const name = data.customerName?.trim() || 'Walk-in Customer'
+    // Resolve or automatically create customer if phone/name provided
+    let resolvedCustomerId = data.customerId
+    if (!resolvedCustomerId && (data.customerPhone?.trim() || data.customerName?.trim())) {
+      const phone = data.customerPhone?.trim() || null
+      const name = data.customerName?.trim() || 'Walk-in Customer'
 
-        if (phone) {
-          const existingCust = await tx.customer.findUnique({
-            where: { phone },
-          })
-          if (existingCust) {
-            resolvedCustomerId = existingCust.id
-            if (data.customerName?.trim() && existingCust.name === 'Walk-in Customer') {
-              await tx.customer.update({
-                where: { id: existingCust.id },
-                data: { name: data.customerName.trim() },
-              })
-            }
-          } else {
-            const newCust = await tx.customer.create({
-              data: {
-                name,
-                phone,
-              },
+      if (phone) {
+        const existingCust = await prisma.customer.findUnique({
+          where: { phone },
+        })
+        if (existingCust) {
+          resolvedCustomerId = existingCust.id
+          if (data.customerName?.trim() && existingCust.name === 'Walk-in Customer') {
+            await prisma.customer.update({
+              where: { id: existingCust.id },
+              data: { name: data.customerName.trim() },
             })
-            resolvedCustomerId = newCust.id
           }
-        } else if (data.customerName?.trim()) {
-          const newCust = await tx.customer.create({
+        } else {
+          const newCust = await prisma.customer.create({
             data: {
               name,
+              phone,
             },
           })
           resolvedCustomerId = newCust.id
         }
-      }
-
-      // Create Sale Record
-      const createdSale = await tx.sale.create({
-        data: {
-          saleNumber,
-          userId: session.user.id,
-          customerId: resolvedCustomerId,
-          offlineOpId: data.offlineOpId,
-          subtotal,
-          discountAmount: data.discountAmount,
-          taxAmount: data.taxAmount,
-          totalAmount,
-          notes: data.notes,
-          saleAt: data.saleAt ? new Date(data.saleAt) : new Date(),
-          syncedAt: new Date(),
-          status: 'COMPLETED',
-          items: {
-            create: validatedItems.map(item => ({
-              productId: item.productId,
-              variantId: item.variantId,
-              productName: item.productName,
-              sku: item.sku,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              unitCost: item.unitCost, // Genuine server cost snapshot
-              discountAmount: item.discountAmount,
-              totalAmount: item.totalAmount,
-              imei: item.imei,
-              serialNumber: item.serialNumber,
-            })),
+      } else if (data.customerName?.trim()) {
+        const newCust = await prisma.customer.create({
+          data: {
+            name,
           },
-          payments: {
-            create: data.payments.map(p => ({
-              method: p.method as any,
-              amount: p.amount,
-              reference: p.reference,
-            })),
-          },
-        },
-        include: {
-          user: { select: { id: true, name: true } },
-          customer: { select: { id: true, name: true, phone: true } },
-          items: true,
-          payments: true,
-        },
-      })
-
-      // Update Stock Balances & Record Auditable Inventory Movements
-      for (const item of validatedItems) {
-        if (item.variantId) {
-          // Decrement variant stock
-          const updatedVariant = await tx.productVariant.update({
-            where: { id: item.variantId },
-            data: { quantity: { decrement: item.quantity } },
-          })
-
-          // Decrement parent product stock
-          const updatedProduct = await tx.product.update({
-            where: { id: item.productId },
-            data: { quantity: { decrement: item.quantity } },
-          })
-
-          // Auditable Inventory Movement for Variant
-          await tx.inventoryMovement.create({
-            data: {
-              productId: item.productId,
-              variantId: item.variantId,
-              type: 'SALE',
-              quantity: -item.quantity,
-              balanceBefore: updatedVariant.quantity + item.quantity,
-              balanceAfter: updatedVariant.quantity,
-              reason: `POS Sale: ${saleNumber} (${item.productName})`,
-              referenceId: createdSale.id,
-              referenceType: 'Sale',
-              imei: item.imei,
-              serialNumber: item.serialNumber,
-              createdBy: session.user.id,
-            },
-          })
-        } else {
-          // Decrement product stock
-          const updatedProduct = await tx.product.update({
-            where: { id: item.productId },
-            data: { quantity: { decrement: item.quantity } },
-          })
-
-          // Auditable Inventory Movement for Standalone Product
-          await tx.inventoryMovement.create({
-            data: {
-              productId: item.productId,
-              type: 'SALE',
-              quantity: -item.quantity,
-              balanceBefore: updatedProduct.quantity + item.quantity,
-              balanceAfter: updatedProduct.quantity,
-              reason: `POS Sale: ${saleNumber} (${item.productName})`,
-              referenceId: createdSale.id,
-              referenceType: 'Sale',
-              imei: item.imei,
-              serialNumber: item.serialNumber,
-              createdBy: session.user.id,
-            },
-          })
-        }
+        })
+        resolvedCustomerId = newCust.id
       }
+    }
 
-      // Record Audit Log
-      await tx.auditLog.create({
-        data: {
-          userId: session.user.id,
-          action: 'SALE_COMPLETED',
-          entityType: 'Sale',
-          entityId: createdSale.id,
-          after: {
+    // ── 4. Atomic Prisma Transaction ──────────────────────────
+    const sale = await prisma.$transaction(
+      async (tx) => {
+        // Create Sale Record
+        const createdSale = await tx.sale.create({
+          data: {
             saleNumber,
-            totalAmount,
-            itemCount: validatedItems.length,
+            userId: session.user.id,
+            customerId: resolvedCustomerId,
             offlineOpId: data.offlineOpId,
+            subtotal,
+            discountAmount: data.discountAmount,
+            taxAmount: data.taxAmount,
+            totalAmount,
+            notes: data.notes,
+            saleAt: data.saleAt ? new Date(data.saleAt) : new Date(),
+            syncedAt: new Date(),
+            status: 'COMPLETED',
+            items: {
+              create: validatedItems.map(item => ({
+                productId: item.productId,
+                variantId: item.variantId,
+                productName: item.productName,
+                sku: item.sku,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                unitCost: item.unitCost, // Genuine server cost snapshot
+                discountAmount: item.discountAmount,
+                totalAmount: item.totalAmount,
+                imei: item.imei,
+                serialNumber: item.serialNumber,
+              })),
+            },
+            payments: {
+              create: data.payments.map(p => ({
+                method: p.method as any,
+                amount: p.amount,
+                reference: p.reference,
+              })),
+            },
           },
-        },
-      })
+          include: {
+            user: { select: { id: true, name: true } },
+            customer: { select: { id: true, name: true, phone: true } },
+            items: true,
+            payments: true,
+          },
+        })
 
-      return createdSale
-    })
+        // Update Stock Balances & Record Auditable Inventory Movements
+        for (const item of validatedItems) {
+          if (item.variantId) {
+            // Decrement variant stock
+            const updatedVariant = await tx.productVariant.update({
+              where: { id: item.variantId },
+              data: { quantity: { decrement: item.quantity } },
+            })
+
+            // Decrement parent product stock
+            const updatedProduct = await tx.product.update({
+              where: { id: item.productId },
+              data: { quantity: { decrement: item.quantity } },
+            })
+
+            // Auditable Inventory Movement for Variant
+            await tx.inventoryMovement.create({
+              data: {
+                productId: item.productId,
+                variantId: item.variantId,
+                type: 'SALE',
+                quantity: -item.quantity,
+                balanceBefore: updatedVariant.quantity + item.quantity,
+                balanceAfter: updatedVariant.quantity,
+                reason: `POS Sale: ${saleNumber} (${item.productName})`,
+                referenceId: createdSale.id,
+                referenceType: 'Sale',
+                imei: item.imei,
+                serialNumber: item.serialNumber,
+                createdBy: session.user.id,
+              },
+            })
+          } else {
+            // Decrement product stock
+            const updatedProduct = await tx.product.update({
+              where: { id: item.productId },
+              data: { quantity: { decrement: item.quantity } },
+            })
+
+            // Auditable Inventory Movement for Standalone Product
+            await tx.inventoryMovement.create({
+              data: {
+                productId: item.productId,
+                type: 'SALE',
+                quantity: -item.quantity,
+                balanceBefore: updatedProduct.quantity + item.quantity,
+                balanceAfter: updatedProduct.quantity,
+                reason: `POS Sale: ${saleNumber} (${item.productName})`,
+                referenceId: createdSale.id,
+                referenceType: 'Sale',
+                imei: item.imei,
+                serialNumber: item.serialNumber,
+                createdBy: session.user.id,
+              },
+            })
+          }
+        }
+
+        // Record Audit Log
+        await tx.auditLog.create({
+          data: {
+            userId: session.user.id,
+            action: 'SALE_COMPLETED',
+            entityType: 'Sale',
+            entityId: createdSale.id,
+            after: {
+              saleNumber,
+              totalAmount,
+              itemCount: validatedItems.length,
+              offlineOpId: data.offlineOpId,
+            },
+          },
+        })
+
+        return createdSale
+      },
+      {
+        maxWait: 15000,
+        timeout: 45000,
+      }
+    )
 
     const changeDue = Math.max(0, totalPaid - totalAmount)
 
