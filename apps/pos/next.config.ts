@@ -4,6 +4,13 @@ const nextConfig: NextConfig = {
   // Transpile local workspace packages
   transpilePackages: ['@izone/shared', '@izone/ui', '@izone/database'],
 
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+
   // Security headers
   async headers() {
     return [

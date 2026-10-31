@@ -11,7 +11,7 @@
     "test:offline-sync": "tsx src/test-offline-sync.ts",
     "clean": "rimraf .next",
     "predev": "node scripts/prepare-ocr.cjs",
-    "prebuild": "node scripts/prepare-ocr.cjs"
+    "prebuild": "node scripts/prepare-ocr.cjs && prisma generate --schema=../../packages/database/prisma/schema.prisma"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
