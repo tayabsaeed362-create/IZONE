@@ -1,0 +1,19 @@
+﻿const {chromium,expect}=require('@playwright/test');
+(async()=>{
+ const browser=await chromium.launch({channel:'chrome',headless:true,args:['--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
+ const page=await browser.newPage({viewport:{width:1280,height:900}});const errors=[];page.on('pageerror',e=>errors.push(e.message));let chooserCount=0;page.on('filechooser',()=>chooserCount++);
+ await page.addInitScript(()=>{window.__streams=[];window.__constraints=[];const original=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);navigator.mediaDevices.getUserMedia=async c=>{window.__constraints.push(c);const s=await original(c);window.__streams.push(s);return s}});
+ let sent;
+ await page.route('**/api/products',async route=>{if(route.request().method()==='POST'){sent=route.request().postDataJSON();await route.fulfill({status:400,json:{success:false,error:'Verification only; no record saved.'}})}else await route.continue()});
+ await page.goto('http://localhost:3000/inventory/new',{waitUntil:'networkidle'});
+ const photos=page.getByRole('region',{name:'Product photos',exact:true});
+ await photos.getByRole('button',{name:'Take Photo',exact:true}).click();let modal=page.getByRole('dialog');await expect(modal.getByRole('button',{name:'Capture',exact:true})).toBeEnabled({timeout:15000});if(chooserCount)throw new Error('Take Photo opened a file chooser');await page.screenshot({path:'artifacts/camera-live-desktop.png'});
+ await modal.getByRole('button',{name:'Capture',exact:true}).click();await expect(modal.getByAltText('Captured photo preview')).toBeVisible();expect(await page.evaluate(()=>window.__streams.every(s=>s.getTracks().every(t=>t.readyState==='ended')))).toBe(true);
+ await modal.getByRole('button',{name:'Retake',exact:true}).click();await expect(modal.getByRole('button',{name:'Capture',exact:true})).toBeEnabled();await modal.getByRole('button',{name:'Capture',exact:true}).click();await modal.getByRole('button',{name:'Use Photo',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(photos.getByAltText('Attached product photo 1')).toBeVisible();
+ const chooser=page.waitForEvent('filechooser');await photos.getByRole('button',{name:'Upload Photo',exact:true}).click();await(await chooser).setFiles('artifacts/imei-screen-test.png');await expect(photos.getByAltText('Attached product photo 2')).toBeVisible();expect(chooserCount).toBe(1);
+ const attached=await photos.locator('img').evaluateAll(imgs=>imgs.map(i=>i.src));expect(attached.every(s=>s.startsWith('data:image/jpeg;base64,'))).toBe(true);
+ await page.getByLabel('Product Title').fill('Camera verification');await page.getByLabel('Category',{exact:false}).selectOption({label:'Accessories'});await page.getByLabel('Selling Price',{exact:false}).fill('1');await page.getByLabel('Initial Stock',{exact:true}).fill('0');await page.getByRole('button',{name:'Save Product',exact:true}).click();await expect(page.locator('form [role=alert]')).toContainText('Verification only');expect(sent.images).toEqual(attached);
+ console.log('PASS: real getUserMedia with synthetic camera, capture/retake, stopped tracks, Use Photo, Upload file picker, durable JPEG strings in intercepted save payload.');
+ await page.setViewportSize({width:390,height:844});await photos.getByRole('button',{name:'Take Photo',exact:true}).click();modal=page.getByRole('dialog');await expect(modal.getByRole('button',{name:'Capture',exact:true})).toBeEnabled();await page.screenshot({path:'artifacts/camera-live-mobile.png'});await modal.getByRole('button',{name:'Cancel',exact:true}).click();expect(await page.evaluate(()=>window.__streams.every(s=>s.getTracks().every(t=>t.readyState==='ended')))).toBe(true);
+ console.log('PASS: Cancel closes preview and stops tracks. Runtime errors:',errors);await browser.close();
+})().catch(e=>{console.error(e);process.exit(1)});

@@ -1,0 +1,23 @@
+﻿const { chromium, expect } = require('@playwright/test');
+const sharp = require('sharp');
+(async () => {
+ const image=Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="850"><rect width="100%" height="100%" fill="#101018"/><g fill="#eeeeff" font-family="Arial" font-size="54"><text x="160" y="160">IMEI</text><text x="160" y="300">IMEI1: 357094993666520</text><text x="160" y="430">IMEI2: 357094995337609</text><text x="160" y="580">PSN: 147404058V008931</text></g></svg>`);
+ await sharp(image).png().toFile('artifacts/imei-screen-test.png');
+ const browser=await chromium.launch({channel:'chrome',headless:true});
+ const page=await browser.newPage({viewport:{width:390,height:844}});const errors=[];const external=[];
+ page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(/^https?:/.test(r.url())&&!r.url().startsWith('http://localhost:3000'))external.push(r.url())});
+ await page.goto('http://localhost:3000/inventory/new',{waitUntil:'networkidle'});
+ await page.getByLabel('Category',{exact:false}).selectOption({label:'Smartphones'});
+ await page.getByLabel('Upload IMEI photo',{exact:true}).setInputFiles('artifacts/imei-screen-test.png');
+ await expect(page.getByLabel('Detected IMEI 1',{exact:true})).toHaveValue('357094993666520',{timeout:120000});
+ await expect(page.getByLabel('Detected IMEI 2',{exact:true})).toHaveValue('357094995337609');
+ await expect(page.getByLabel('IMEI 1 (optional)',{exact:true})).toHaveValue('');
+ await page.screenshot({path:'artifacts/imei-photo-review-mobile.png',fullPage:true});
+ await page.getByRole('button',{name:'Use these IMEIs',exact:true}).click();
+ await expect(page.getByLabel('IMEI 1 (optional)',{exact:true})).toHaveValue('357094993666520');
+ await expect(page.getByLabel('IMEI 2 (optional)',{exact:true})).toHaveValue('357094995337609');
+ await expect(page.getByAltText('Selected IMEI photo for review')).toHaveCount(0);
+ console.log('PASS: actual local OCR read both IMEIs, ignored serial, required review, and filled fields.');
+ console.log({errors,external,overflow:await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)});
+ await browser.close();
+})().catch(e=>{console.error(e);process.exit(1)});

@@ -1,0 +1,32 @@
+﻿const { chromium, expect } = require('@playwright/test');
+(async () => {
+ const browser = await chromium.launch({channel:'chrome',headless:true});
+ const page = await browser.newPage({viewport:{width:390,height:844}});
+ let quantity=0; let accessoryName=''; let phoneName=''; const errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.route('**/api/products?*',async route=>{
+  const response=await route.fetch(); const json=await response.json();
+  const accessory=json.data.products.find(p=>p.category?.name==='Cases & Covers');
+  const phone=json.data.products.find(p=>p.category?.name==='Smartphones');
+  accessoryName=accessory.name;phoneName=phone.name;
+  accessory.quantity=quantity;phone.quantity=0;
+  await route.fulfill({response,json});
+ });
+ await page.goto('http://localhost:3000/pos',{waitUntil:'networkidle'});
+ await expect(page.locator('h4').filter({hasText:phoneName})).toHaveCount(0);
+ await page.getByRole('button',{name:'Accessories',exact:true}).click();
+ await expect(page.locator('h4').filter({hasText:accessoryName})).toHaveCount(0);
+ await page.getByRole('button',{name:'Out of Stock',exact:true}).click();
+ await expect(page.locator('h4').filter({hasText:accessoryName})).toBeVisible();
+ await expect(page.locator('h4').filter({hasText:phoneName})).toHaveCount(0);
+ await page.locator('h4').filter({hasText:accessoryName}).click();
+ await expect(page.getByText('Cart is empty',{exact:true})).toBeVisible();
+ await page.screenshot({path:'artifacts/pos-out-of-stock.png',fullPage:true});
+ quantity=8;
+ await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+ await expect(page.locator('h4').filter({hasText:accessoryName})).toHaveCount(0);
+ await page.getByRole('button',{name:'Accessories',exact:true}).click();
+ await expect(page.locator('h4').filter({hasText:accessoryName})).toBeVisible();
+ console.log('PASS: zero-stock accessories move to register; smartphones hidden; register cannot add to cart; restock returns accessories automatically. JS errors:',errors);
+ await browser.close();
+})().catch(e=>{console.error(e);process.exit(1)});

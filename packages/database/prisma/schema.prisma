@@ -1,0 +1,571 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// SHOP & USERS
+// ============================================================
+
+model Shop {
+  id        String   @id @default(cuid())
+  name      String
+  address   String?
+  phone     String?
+  email     String?
+  website   String?
+  logoUrl   String?
+  currency  String   @default("PKR")
+  taxRate   Float    @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users       User[]
+  devices     Device[]
+  expenses    Expense[]
+  catalogSettings CatalogSettings?
+
+  @@map("shops")
+}
+
+enum Role {
+  OWNER
+  CASHIER
+  VIEWER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  shopId       String
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(CASHIER)
+  isActive     Boolean  @default(true)
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  shop      Shop      @relation(fields: [shopId], references: [id])
+  sales     Sale[]
+  purchases Purchase[]
+  expenses  Expense[]
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+model Device {
+  id          String   @id @default(cuid())
+  shopId      String
+  deviceName  String
+  deviceType  String   @default("mobile")
+  isPrimary   Boolean  @default(false)
+  lastSeenAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  shop         Shop           @relation(fields: [shopId], references: [id])
+  syncOperations SyncOperation[]
+
+  @@map("devices")
+}
+
+// ============================================================
+// PRODUCT CATALOG
+// ============================================================
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  imageUrl    String?
+  parentId    String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryHierarchy")
+  products Product[]
+
+  @@map("categories")
+}
+
+model Brand {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  logoUrl   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  products Product[]
+
+  @@map("brands")
+}
+
+model Supplier {
+  id          String   @id @default(cuid())
+  name        String
+  contactName String?
+  phone       String?
+  email       String?
+  address     String?
+  notes       String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products  Product[]
+  purchases Purchase[]
+
+  @@map("suppliers")
+}
+
+model Product {
+  id                 String   @id @default(cuid())
+  sku                String   @unique
+  name               String
+  slug               String   @unique
+  description        String?
+  categoryId         String?
+  brandId            String?
+  supplierId         String?
+  purchasePrice      Float    @default(0)
+  sellingPrice       Float    @default(0)
+  minSellingPrice    Float    @default(0)
+  discountAmount     Float    @default(0)
+  discountPercent    Float    @default(0)
+  quantity           Int      @default(0)
+  minStockLevel      Int      @default(5)
+  warrantyPeriodDays Int?
+  hasImei            Boolean  @default(false)
+  imei1              String?
+  imei2              String?
+  imeiCycle          Int      @default(1)
+  status             ProductStatus @default(ACTIVE)
+  isApproved         Boolean  @default(true)
+  images             String[] @default([])
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // Catalog / Storefront fields
+  isPublished        Boolean  @default(false)
+  isFeatured         Boolean  @default(false)
+  onlineDescription  String?
+  onlinePrice        Float?
+
+  category    Category?   @relation(fields: [categoryId], references: [id])
+  brand       Brand?      @relation(fields: [brandId], references: [id])
+  supplier    Supplier?   @relation(fields: [supplierId], references: [id])
+  variants    ProductVariant[]
+  barcodes    ProductBarcode[]
+  saleItems   SaleItem[]
+  purchaseItems PurchaseItem[]
+  inventoryMovements InventoryMovement[]
+
+  @@index([sku])
+  @@index([slug])
+  @@index([categoryId])
+  @@index([status])
+  @@index([isPublished])
+  @@index([imei1])
+  @@index([imei2])
+  @@map("products")
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  DISCONTINUED
+}
+
+model ProductVariant {
+  id            String   @id @default(cuid())
+  productId     String
+  name          String   // e.g. "128GB Black"
+  sku           String   @unique
+  attributes    Json     // { color: "Black", storage: "128GB", ram: "8GB" }
+  purchasePrice Float    @default(0)
+  sellingPrice  Float    @default(0)
+  minSellingPrice Float  @default(0)
+  quantity      Int      @default(0)
+  imageUrl      String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  barcodes  ProductBarcode[]
+  saleItems SaleItem[]
+
+  @@index([productId])
+  @@index([sku])
+  @@map("product_variants")
+}
+
+model ProductBarcode {
+  id        String      @id @default(cuid())
+  productId String
+  variantId String?
+  barcode   String      @unique
+  type      BarcodeType @default(EAN13)
+  createdAt DateTime    @default(now())
+
+  product Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@index([barcode])
+  @@map("product_barcodes")
+}
+
+enum BarcodeType {
+  EAN13
+  UPC_A
+  CODE128
+  QR
+  INTERNAL
+}
+
+// ============================================================
+// INVENTORY
+// ============================================================
+
+enum MovementType {
+  STOCK_IN
+  STOCK_OUT
+  SALE
+  RETURN
+  DAMAGED
+  ADJUSTMENT
+  PURCHASE_RECEIVED
+  INITIAL
+}
+
+model InventoryMovement {
+  id          String       @id @default(cuid())
+  productId   String
+  variantId   String?
+  type        MovementType
+  quantity    Int          // positive = in, negative = out
+  balanceBefore Int
+  balanceAfter  Int
+  reason      String?
+  referenceId String?      // saleId, purchaseId, returnId
+  referenceType String?    // "Sale", "Purchase", "Return", "Manual"
+  imei        String?
+  serialNumber String?
+  notes       String?
+  createdAt   DateTime     @default(now())
+  createdBy   String?
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("inventory_movements")
+}
+
+// ============================================================
+// PURCHASES
+// ============================================================
+
+enum PurchaseStatus {
+  DRAFT
+  ORDERED
+  RECEIVED
+  PARTIAL
+  CANCELLED
+}
+
+model Purchase {
+  id           String         @id @default(cuid())
+  supplierId   String?
+  userId       String
+  invoiceNo    String?
+  status       PurchaseStatus @default(RECEIVED)
+  isApproved   Boolean        @default(true)
+  totalAmount  Float          @default(0)
+  paidAmount   Float          @default(0)
+  notes        String?
+  purchasedAt  DateTime       @default(now())
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  supplier Supplier?      @relation(fields: [supplierId], references: [id])
+  user     User           @relation(fields: [userId], references: [id])
+  items    PurchaseItem[]
+
+  @@index([supplierId])
+  @@index([purchasedAt])
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id            String  @id @default(cuid())
+  purchaseId    String
+  productId     String
+  variantId     String?
+  quantity      Int
+  unitCost      Float
+  totalCost     Float
+  imeiList      String[] @default([])
+
+  purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id])
+
+  @@index([purchaseId])
+  @@map("purchase_items")
+}
+
+// ============================================================
+// CUSTOMERS
+// ============================================================
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String?  @unique
+  email     String?
+  address   String?
+  notes     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sales Sale[]
+
+  @@index([phone])
+  @@map("customers")
+}
+
+// ============================================================
+// SALES & POS
+// ============================================================
+
+enum SaleStatus {
+  COMPLETED
+  CANCELLED
+  REFUNDED
+  PARTIAL_REFUND
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  MOBILE_WALLET
+  BANK_TRANSFER
+  CREDIT
+  OTHER
+}
+
+model Sale {
+  id              String      @id @default(cuid())
+  saleNumber      String      @unique  // Human-readable: INV-2024-00001
+  userId          String
+  customerId      String?
+  status          SaleStatus  @default(COMPLETED)
+  subtotal        Float
+  discountAmount  Float       @default(0)
+  taxAmount       Float       @default(0)
+  totalAmount     Float
+  notes           String?
+  offlineOpId     String?     @unique  // Idempotency key from offline device
+  syncedAt        DateTime?
+  saleAt          DateTime    @default(now())
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id])
+  items    SaleItem[]
+  payments Payment[]
+  returns  Return[]
+
+  @@index([userId])
+  @@index([customerId])
+  @@index([saleAt])
+  @@index([offlineOpId])
+  @@map("sales")
+}
+
+model SaleItem {
+  id           String  @id @default(cuid())
+  saleId       String
+  productId    String
+  variantId    String?
+  productName  String  // Snapshot
+  sku          String  // Snapshot
+  quantity     Int
+  unitPrice    Float   // Snapshot of selling price
+  unitCost     Float   // Snapshot of purchase price for profit calc
+  discountAmount Float @default(0)
+  totalAmount  Float
+  imei         String?
+  serialNumber String?
+
+  sale    Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product        @relation(fields: [productId], references: [id])
+  variant ProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@index([saleId])
+  @@map("sale_items")
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  saleId    String
+  method    PaymentMethod @default(CASH)
+  amount    Float
+  reference String?       // Card/transfer reference
+  createdAt DateTime      @default(now())
+
+  sale Sale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([saleId])
+  @@map("payments")
+}
+
+// ============================================================
+// RETURNS
+// ============================================================
+
+model Return {
+  id          String   @id @default(cuid())
+  saleId      String
+  reason      String?
+  totalAmount Float
+  refundMethod PaymentMethod @default(CASH)
+  createdAt   DateTime @default(now())
+  createdBy   String?
+
+  sale  Sale         @relation(fields: [saleId], references: [id])
+  items ReturnItem[]
+
+  @@index([saleId])
+  @@map("returns")
+}
+
+model ReturnItem {
+  id          String @id @default(cuid())
+  returnId    String
+  productId   String
+  variantId   String?
+  productName String
+  quantity    Int
+  unitPrice   Float
+  totalAmount Float
+
+  return Return @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  @@map("return_items")
+}
+
+// ============================================================
+// EXPENSES
+// ============================================================
+
+model Expense {
+  id          String   @id @default(cuid())
+  shopId      String
+  userId      String
+  category    String   // Rent, Utilities, Salary, Marketing, etc.
+  amount      Float
+  description String?
+  expenseAt   DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([shopId])
+  @@index([expenseAt])
+  @@map("expenses")
+}
+
+// ============================================================
+// CATALOG SETTINGS (Public Storefront)
+// ============================================================
+
+model CatalogSettings {
+  id            String   @id @default(cuid())
+  shopId        String   @unique
+  shopName      String
+  tagline       String?
+  heroImageUrl  String?
+  bannerText    String?
+  whatsappNumber String?
+  showPrices    Boolean  @default(true)
+  allowOrders   Boolean  @default(true)
+  metaTitle     String?
+  metaDescription String?
+  updatedAt     DateTime @updatedAt
+
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@map("catalog_settings")
+}
+
+// ============================================================
+// SYNC & OFFLINE
+// ============================================================
+
+enum SyncStatus {
+  PENDING
+  PROCESSING
+  SYNCED
+  FAILED
+  CONFLICT
+}
+
+model SyncOperation {
+  id          String     @id  // UUID from offline device (idempotency key)
+  deviceId    String?
+  type        String     // "SALE", "RETURN", "ADJUSTMENT", "CATALOG_UPDATE"
+  payload     Json
+  status      SyncStatus @default(PENDING)
+  attempts    Int        @default(0)
+  errorMsg    String?
+  processedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  device Device? @relation(fields: [deviceId], references: [id])
+
+  @@index([status])
+  @@index([deviceId])
+  @@index([createdAt])
+  @@map("sync_operations")
+}
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String   // e.g. "PRODUCT_UPDATED", "SALE_DELETED"
+  entityType String   // e.g. "Product", "Sale"
+  entityId   String?
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
