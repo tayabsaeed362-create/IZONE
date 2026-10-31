@@ -33,6 +33,9 @@ export function useBarcodeScanner(): UseBarcodeScanner {
   const streamRef = useRef<MediaStream | null>(null)
   const lastDetectedRef = useRef<{ code: string; time: number } | null>(null)
 
+  const isScanningRef = useRef(false)
+  const isLoadingRef = useRef(false)
+
   const [state, setState] = useState<ScannerState>({
     isScanning: false,
     isLoading: false,
@@ -63,9 +66,10 @@ export function useBarcodeScanner(): UseBarcodeScanner {
         BarcodeFormat.QR_CODE,
         BarcodeFormat.DATA_MATRIX,
         BarcodeFormat.ITF,
+        BarcodeFormat.CODABAR,
       ])
       hints.set(DecodeHintType.TRY_HARDER, true)
-      readerRef.current = new BrowserMultiFormatReader(hints, 200)
+      readerRef.current = new BrowserMultiFormatReader(hints, 150)
     }
     return readerRef.current
   }, [])
@@ -84,7 +88,7 @@ export function useBarcodeScanner(): UseBarcodeScanner {
 
   // ── Start scanning ─────────────────────────────────────────
   const startScanning = useCallback(async (preferredCameraId?: string) => {
-    if (state.isScanning || state.isLoading) return
+    if (isLoadingRef.current) return
 
     // Verify browser support for camera stream
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
@@ -96,19 +100,21 @@ export function useBarcodeScanner(): UseBarcodeScanner {
       return
     }
 
+    isLoadingRef.current = true
     updateState({ isLoading: true, error: null })
 
     try {
       // 1. Wait a moment if video element is still mounting
       let videoEl = videoRef.current
       let attempts = 0
-      while (!videoEl && attempts < 10) {
+      while (!videoEl && attempts < 15) {
         await new Promise(res => setTimeout(res, 80))
         videoEl = videoRef.current
         attempts++
       }
 
       if (!videoEl) {
+        isLoadingRef.current = false
         updateState({ error: 'Video element not ready. Try again.', isLoading: false })
         return
       }
@@ -157,9 +163,23 @@ export function useBarcodeScanner(): UseBarcodeScanner {
       const hasTorch = await checkTorchSupport(stream)
       const reader = getReader()
 
-      // Bind stream to video element
+      // Bind stream to video element with mobile-friendly attributes
+      videoEl.setAttribute('playsinline', 'true')
+      videoEl.setAttribute('muted', 'true')
+      videoEl.muted = true
       videoEl.srcObject = stream
       await videoEl.play().catch(() => {})
+
+      // Try autofocus constraint if supported
+      try {
+        const track = stream.getVideoTracks()[0]
+        if (track) {
+          const caps = (track.getCapabilities?.() as any) || {}
+          if (caps.focusMode && Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
+            await (track as any).applyConstraints({ advanced: [{ focusMode: 'continuous' }] })
+          }
+        }
+      } catch {}
 
       // 4. Start decoding from stream
       reader.decodeFromStream(stream, videoEl, (result, error) => {
@@ -188,6 +208,9 @@ export function useBarcodeScanner(): UseBarcodeScanner {
         c.label.toLowerCase().includes('environment')
       )
 
+      isScanningRef.current = true
+      isLoadingRef.current = false
+
       updateState({
         isScanning: true,
         isLoading: false,
@@ -198,6 +221,9 @@ export function useBarcodeScanner(): UseBarcodeScanner {
         error: null,
       })
     } catch (err: unknown) {
+      isScanningRef.current = false
+      isLoadingRef.current = false
+
       let errorMsg = 'Camera access failed.'
       if (err instanceof DOMException) {
         if (err.name === 'NotAllowedError') {
@@ -214,10 +240,12 @@ export function useBarcodeScanner(): UseBarcodeScanner {
       }
       updateState({ error: errorMsg, isLoading: false, isScanning: false })
     }
-  }, [state.isScanning, state.isLoading, getReader, checkTorchSupport, updateState])
+  }, [getReader, checkTorchSupport, updateState])
 
   // ── Stop scanning ──────────────────────────────────────────
   const stopScanning = useCallback(() => {
+    isScanningRef.current = false
+    isLoadingRef.current = false
     try {
       readerRef.current?.reset()
     } catch {}
@@ -225,7 +253,7 @@ export function useBarcodeScanner(): UseBarcodeScanner {
       streamRef.current.getTracks().forEach(t => t.stop())
       streamRef.current = null
     }
-    updateState({ isScanning: false, torchOn: false })
+    updateState({ isScanning: false, isLoading: false, torchOn: false })
   }, [updateState])
 
   // ── Toggle torch ───────────────────────────────────────────
