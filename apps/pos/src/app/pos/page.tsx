@@ -545,6 +545,8 @@ export default function POSTerminalPage() {
           reference: saleNotes || undefined,
         },
       ],
+      customerName: customerName.trim() || undefined,
+      customerPhone: customerPhone.trim() || undefined,
       notes: saleNotes || undefined,
     }
 

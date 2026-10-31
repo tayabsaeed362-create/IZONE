@@ -17,6 +17,8 @@ async function clearInventory() {
     const barcodes = await tx.productBarcode.deleteMany({})
     const variants = await tx.productVariant.deleteMany({})
     const products = await tx.product.deleteMany({})
+    const expenses = await tx.expense.deleteMany({})
+    const customers = await tx.customer.deleteMany({})
     const syncOps = await tx.syncOperation.deleteMany({})
     const auditLogs = await tx.auditLog.deleteMany({})
 
@@ -32,6 +34,8 @@ async function clearInventory() {
       barcodes: barcodes.count,
       variants: variants.count,
       products: products.count,
+      expenses: expenses.count,
+      customers: customers.count,
       syncOps: syncOps.count,
       auditLogs: auditLogs.count,
     }

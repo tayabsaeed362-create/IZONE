@@ -255,12 +255,49 @@ export async function POST(request: NextRequest) {
       const saleCount = await tx.sale.count()
       const saleNumber = getSaleNumber(saleCount + 1)
 
+      // Resolve or automatically create customer if phone/name provided
+      let resolvedCustomerId = data.customerId
+      if (!resolvedCustomerId && (data.customerPhone?.trim() || data.customerName?.trim())) {
+        const phone = data.customerPhone?.trim() || null
+        const name = data.customerName?.trim() || 'Walk-in Customer'
+
+        if (phone) {
+          const existingCust = await tx.customer.findUnique({
+            where: { phone },
+          })
+          if (existingCust) {
+            resolvedCustomerId = existingCust.id
+            if (data.customerName?.trim() && existingCust.name === 'Walk-in Customer') {
+              await tx.customer.update({
+                where: { id: existingCust.id },
+                data: { name: data.customerName.trim() },
+              })
+            }
+          } else {
+            const newCust = await tx.customer.create({
+              data: {
+                name,
+                phone,
+              },
+            })
+            resolvedCustomerId = newCust.id
+          }
+        } else if (data.customerName?.trim()) {
+          const newCust = await tx.customer.create({
+            data: {
+              name,
+            },
+          })
+          resolvedCustomerId = newCust.id
+        }
+      }
+
       // Create Sale Record
       const createdSale = await tx.sale.create({
         data: {
           saleNumber,
           userId: session.user.id,
-          customerId: data.customerId,
+          customerId: resolvedCustomerId,
           offlineOpId: data.offlineOpId,
           subtotal,
           discountAmount: data.discountAmount,

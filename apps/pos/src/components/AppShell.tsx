@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { LayoutDashboard, ShoppingBag, Package, Receipt, BarChart3, Truck, Wallet, RotateCcw, RefreshCw, Menu, X, ArrowUpRight, Store, LogOut, User as UserIcon } from 'lucide-react'
+import { LayoutDashboard, ShoppingBag, Package, Receipt, Users, BarChart3, Truck, Wallet, RotateCcw, RefreshCw, Menu, X, ArrowUpRight, Store, LogOut, User as UserIcon } from 'lucide-react'
 import { useSession, signOut } from 'next-auth/react'
 
 type NavLink = {
@@ -18,6 +18,7 @@ const links: NavLink[] = [
   { href: '/pos', label: 'Point of sale', icon: ShoppingBag },
   { href: '/inventory', label: 'Inventory', icon: Package },
   { href: '/sales', label: 'Sales', icon: Receipt },
+  { href: '/customers', label: 'Customers', icon: Users },
   { href: '/reports', label: 'Reports', icon: BarChart3, ownerOnly: true },
   { href: '/purchases', label: 'Purchases', icon: Truck },
   { href: '/suppliers', label: 'Suppliers', icon: Store, ownerOnly: true },

@@ -77,6 +77,8 @@ export const SaleItemSchema = z.object({
 export const CreateSaleSchema = z.object({
   offlineOpId: z.string().min(8).max(128),  // Idempotency key (UUID or client-generated op ID)
   customerId: z.string().optional(),
+  customerName: z.string().optional(),
+  customerPhone: z.string().optional(),
   items: z.array(SaleItemSchema).min(1),
   discountAmount: z.number().min(0).default(0),
   taxAmount: z.number().min(0).default(0),
