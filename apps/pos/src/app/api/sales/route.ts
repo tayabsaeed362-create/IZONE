@@ -487,7 +487,7 @@ export async function GET(request: NextRequest) {
     const startDate = searchParams.get('start')
     const endDate = searchParams.get('end')
     const status = searchParams.get('status')
-    const query = searchParams.get('q')
+    const query = searchParams.get('q') || searchParams.get('search')
 
     const where: Record<string, unknown> = {}
     if (startDate || endDate) {

@@ -23,7 +23,7 @@ const links: NavLink[] = [
   { href: '/purchases', label: 'Purchases', icon: Truck },
   { href: '/suppliers', label: 'Suppliers', icon: Store, ownerOnly: true },
   { href: '/expenses', label: 'Expenses', icon: Wallet, ownerOnly: true },
-  { href: '/returns', label: 'Returns', icon: RotateCcw, ownerOnly: true },
+  { href: '/returns', label: 'Returns', icon: RotateCcw },
   { href: '/sync', label: 'Sync center', icon: RefreshCw, ownerOnly: true },
 ]
 export function AppShell({ children }: { children: React.ReactNode }) {

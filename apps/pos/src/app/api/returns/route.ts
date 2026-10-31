@@ -26,8 +26,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(apiError('Unauthorized', 'UNAUTHORIZED'), { status: 401 })
     }
 
-    if (session.user.role !== 'OWNER') {
-      return NextResponse.json(apiError('Forbidden: Only store owner can view returns', 'FORBIDDEN'), { status: 403 })
+    if (session.user.role !== 'OWNER' && session.user.role !== 'CASHIER') {
+      return NextResponse.json(apiError('Forbidden: Access denied', 'FORBIDDEN'), { status: 403 })
     }
 
     const { searchParams } = new URL(request.url)
@@ -80,8 +80,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(apiError('Unauthorized', 'UNAUTHORIZED'), { status: 401 })
     }
 
-    if (session.user.role !== 'OWNER') {
-      return NextResponse.json(apiError('Forbidden: Only store owner can process returns', 'FORBIDDEN'), { status: 403 })
+    if (session.user.role !== 'OWNER' && session.user.role !== 'CASHIER') {
+      return NextResponse.json(apiError('Forbidden: Access denied', 'FORBIDDEN'), { status: 403 })
     }
 
     const body = await request.json()

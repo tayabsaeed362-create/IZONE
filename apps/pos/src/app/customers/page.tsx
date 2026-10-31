@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   Users, Search, Plus, Phone, Calendar, ShoppingBag,
   ArrowRight, X, Clock, User, DollarSign, FileText,
-  Smartphone, ChevronRight, Hash, MapPin, Receipt, ArrowLeft
+  Smartphone, ChevronRight, Hash, MapPin, Receipt, ArrowLeft, RotateCcw
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSession } from 'next-auth/react'
@@ -425,8 +425,17 @@ export default function CustomersPage() {
                                 {sale.status}
                               </span>
                             </div>
-                            <div className="text-right">
+                            <div className="text-right flex items-center gap-2">
                               <span className="text-sm font-bold text-slate-900">{formatCurrency(sale.totalAmount)}</span>
+                              {sale.status !== 'REFUNDED' && (
+                                <Link
+                                  href={`/returns?invoice=${encodeURIComponent(sale.saleNumber)}`}
+                                  className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-[11px] font-semibold flex items-center gap-1 transition"
+                                >
+                                  <RotateCcw size={12} />
+                                  <span>Return Item</span>
+                                </Link>
+                              )}
                             </div>
                           </div>
 

@@ -88,20 +88,13 @@ export default function ReturnsPage() {
     }
   }
 
-  useEffect(() => {
-    fetchReturns()
-  }, [])
-
-  async function handleLookup(e: React.FormEvent) {
-    e.preventDefault()
-    if (!invoiceQuery.trim()) return
-
+  async function lookupInvoice(query: string) {
     setSearching(true)
     setLookupError('')
     setLookedUpSale(null)
     setReturnSelections({})
     try {
-      const res = await fetch(`/api/sales?search=${encodeURIComponent(invoiceQuery.trim())}`)
+      const res = await fetch(`/api/sales?search=${encodeURIComponent(query)}`)
       if (res.ok) {
         const d = await res.json()
         if (d.success && d.data.sales.length > 0) {
@@ -122,6 +115,24 @@ export default function ReturnsPage() {
     } finally {
       setSearching(false)
     }
+  }
+
+  useEffect(() => {
+    fetchReturns()
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const inv = params.get('invoice')
+      if (inv) {
+        setInvoiceQuery(inv)
+        lookupInvoice(inv)
+      }
+    }
+  }, [])
+
+  async function handleLookup(e: React.FormEvent) {
+    e.preventDefault()
+    if (!invoiceQuery.trim()) return
+    await lookupInvoice(invoiceQuery.trim())
   }
 
   function toggleItemReturn(itemId: string, maxQty: number) {
@@ -207,20 +218,7 @@ export default function ReturnsPage() {
     }
   }
 
-  if (status !== 'loading' && session?.user && session.user.role !== 'OWNER') {
-    return (
-      <div className="p-8 max-w-md mx-auto text-center space-y-4 my-12 bg-white rounded-2xl border border-slate-100 shadow-sm">
-        <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
-          <AlertCircle size={24} />
-        </div>
-        <h2 className="text-xl font-bold text-slate-900">Access Restricted</h2>
-        <p className="text-sm text-slate-600">Customer returns & refunds are restricted to Store Owners only.</p>
-        <Link href="/pos" className="btn-primary inline-flex items-center gap-2">
-          Go to Point of Sale
-        </Link>
-      </div>
-    )
-  }
+
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
