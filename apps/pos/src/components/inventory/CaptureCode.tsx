@@ -1,7 +1,18 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Camera, X, RefreshCw, Zap, Volume2, Keyboard, Check, AlertCircle } from 'lucide-react'
+import {
+  Camera,
+  X,
+  RefreshCw,
+  Zap,
+  Keyboard,
+  Check,
+  AlertCircle,
+  Upload,
+  Sparkles,
+  Maximize2,
+} from 'lucide-react'
 import { useBarcodeScanner } from '@/hooks/useBarcodeScanner'
 
 export function CaptureCode({
@@ -22,12 +33,16 @@ export function CaptureCode({
     toggleTorch,
     onDetected,
     resetScanner,
+    captureCurrentFrame,
+    scanImage,
   } = useBarcodeScanner()
 
   const [activeTab, setActiveTab] = useState<'camera' | 'manual'>('camera')
   const [manualCode, setManualCode] = useState('')
   const [inputError, setInputError] = useState('')
+  const [isProcessingSnap, setIsProcessingSnap] = useState(false)
   const audioCtxRef = useRef<AudioContext | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // ── Pleasant Beep Sound ──────────────────────────────────────
   const playBeep = useCallback(() => {
@@ -53,7 +68,7 @@ export function CaptureCode({
         osc.stop(ctx.currentTime + 0.12)
       }
     } catch {
-      // Audio autoplay policy fallback
+      // Audio autoplay fallback
     }
 
     try {
@@ -65,17 +80,30 @@ export function CaptureCode({
     }
   }, [])
 
-  // ── Handle Scanned Code ──────────────────────────────────────
+  // ── Handle Scanned Code & Intelligent Cleaning ───────────────
   const handleCodeFound = useCallback(
     (rawCode: string) => {
       const code = rawCode.trim()
       if (!code) return
 
-      if (label.toLowerCase().includes('imei') && !/^\d{15}$/.test(code)) {
-        setInputError('Scanned code must be a 15-digit numeric IMEI.')
-        return
+      const isImei = label.toLowerCase().includes('imei')
+      if (isImei) {
+        // Extract numeric digits from string
+        const digits = code.replace(/\D/g, '')
+        if (digits.length >= 15) {
+          const cleanImei = digits.slice(0, 15)
+          playBeep()
+          stopScanning()
+          resetScanner()
+          onCapture(cleanImei)
+          return
+        } else {
+          setInputError(`Extracted ${digits.length} digits. A valid IMEI must have 15 digits.`)
+          return
+        }
       }
 
+      // Standard Product Barcode
       playBeep()
       stopScanning()
       resetScanner()
@@ -116,6 +144,40 @@ export function CaptureCode({
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [onClose, stopScanning, resetScanner])
 
+  // ── Snap Current Frame (Manual Snapshot Decode) ──────────────
+  const handleSnapFrame = async () => {
+    setIsProcessingSnap(true)
+    setInputError('')
+    try {
+      const detected = await captureCurrentFrame()
+      if (!detected) {
+        setInputError('No barcode recognized in current frame. Hold still or bring closer.')
+      }
+    } catch {
+      setInputError('Could not read frame. Please try again.')
+    } finally {
+      setIsProcessingSnap(false)
+    }
+  }
+
+  // ── Upload Image File ────────────────────────────────────────
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setIsProcessingSnap(true)
+    setInputError('')
+    try {
+      const detected = await scanImage(file)
+      if (!detected) {
+        setInputError('No barcode found in uploaded photo. Ensure barcode is clear and in focus.')
+      }
+    } catch {
+      setInputError('Error decoding image file.')
+    } finally {
+      setIsProcessingSnap(false)
+    }
+  }
+
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     handleCodeFound(manualCode)
@@ -123,7 +185,7 @@ export function CaptureCode({
 
   return (
     <div
-      className="fixed inset-0 z-[70] bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
+      className="fixed inset-0 z-[70] bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150"
       role="dialog"
       aria-modal="true"
       aria-label={`Scan ${label}`}
@@ -183,7 +245,7 @@ export function CaptureCode({
         </div>
 
         {/* Content Body */}
-        <div className="p-5 space-y-3.5">
+        <div className="p-4 sm:p-5 space-y-3.5">
           {inputError && (
             <div className="p-3 rounded-xl bg-red-950/60 border border-red-800/60 text-red-300 text-xs flex items-center gap-2">
               <AlertCircle size={15} className="shrink-0" />
@@ -206,12 +268,12 @@ export function CaptureCode({
                 {/* Laser & Reticle Aiming Frame */}
                 {state.isScanning && (
                   <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                    <div className="relative w-3/4 h-3/5 border-2 border-blue-500/80 rounded-xl shadow-[0_0_20px_rgba(59,130,246,0.3)]">
+                    <div className="relative w-4/5 h-3/5 border-2 border-blue-500/80 rounded-xl shadow-[0_0_20px_rgba(59,130,246,0.3)]">
                       {/* Corners */}
-                      <span className="absolute -top-1 -left-1 w-3.5 h-3.5 border-t-2 border-l-2 border-blue-400" />
-                      <span className="absolute -top-1 -right-1 w-3.5 h-3.5 border-t-2 border-r-2 border-blue-400" />
-                      <span className="absolute -bottom-1 -left-1 w-3.5 h-3.5 border-b-2 border-l-2 border-blue-400" />
-                      <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 border-b-2 border-r-2 border-blue-400" />
+                      <span className="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-blue-400" />
+                      <span className="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-blue-400" />
+                      <span className="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-blue-400" />
+                      <span className="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-blue-400" />
 
                       {/* Moving Laser Beam */}
                       <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-red-500 to-transparent shadow-[0_0_8px_#ef4444] animate-bounce" />
@@ -223,7 +285,7 @@ export function CaptureCode({
                 {state.isLoading && (
                   <div className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center gap-2.5 text-zinc-300">
                     <RefreshCw size={24} className="animate-spin text-blue-400" />
-                    <span className="text-xs font-medium">Starting camera...</span>
+                    <span className="text-xs font-medium">Starting camera stream...</span>
                   </div>
                 )}
 
@@ -254,16 +316,17 @@ export function CaptureCode({
                 )}
               </div>
 
-              {/* Viewfinder Toolbar Controls */}
-              <div className="flex items-center justify-between text-xs text-zinc-400 pt-1">
-                <div className="flex items-center gap-2">
+              {/* Viewfinder Controls & Snap Buttons */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <div className="flex items-center gap-1.5">
                   {state.hasMultipleCameras && (
                     <button
                       type="button"
                       onClick={switchCamera}
-                      className="px-2.5 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white transition flex items-center gap-1.5"
+                      className="px-2.5 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white transition flex items-center gap-1.5 text-xs font-medium"
+                      title="Switch between front and back camera"
                     >
-                      <RefreshCw size={12} />
+                      <RefreshCw size={13} />
                       <span>Switch Camera</span>
                     </button>
                   )}
@@ -272,19 +335,62 @@ export function CaptureCode({
                     <button
                       type="button"
                       onClick={toggleTorch}
-                      className={`px-2.5 py-1.5 rounded-lg border transition flex items-center gap-1.5 ${
+                      className={`px-2.5 py-1.5 rounded-lg border transition flex items-center gap-1.5 text-xs font-medium ${
                         state.torchOn
                           ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
                           : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
                       }`}
+                      title="Toggle flashlight"
                     >
-                      <Zap size={12} />
+                      <Zap size={13} />
                       <span>{state.torchOn ? 'Torch On' : 'Torch'}</span>
                     </button>
                   )}
                 </div>
 
-                <span className="text-[11px] text-zinc-500">Auto-captures on focus</span>
+                {/* Snap & File Upload Controls */}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleSnapFrame}
+                    disabled={isProcessingSnap || !state.isScanning}
+                    className="px-3 py-1.5 rounded-lg bg-blue-600/30 hover:bg-blue-600/40 text-blue-300 border border-blue-500/40 transition flex items-center gap-1.5 text-xs font-semibold disabled:opacity-50"
+                    title="Capture still frame and decode"
+                  >
+                    {isProcessingSnap ? (
+                      <RefreshCw size={13} className="animate-spin" />
+                    ) : (
+                      <Sparkles size={13} />
+                    )}
+                    <span>Snap & Scan</span>
+                  </button>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 transition flex items-center gap-1.5 text-xs"
+                    title="Upload photo of barcode"
+                  >
+                    <Upload size={13} />
+                    <span>Upload Photo</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-zinc-950/40 p-2.5 rounded-xl border border-zinc-800 text-[11px] text-zinc-400 flex items-center justify-between">
+                <span>Hold barcode 10-20 cm away in steady light</span>
+                <span className="text-emerald-400 font-medium flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Auto-Scanning
+                </span>
               </div>
             </div>
           ) : (
