@@ -8,9 +8,10 @@ import {
   formatDateTime,
   generateOperationId,
 } from '@izone/shared'
+import { toast } from 'sonner'
 import { BarcodeScannerModal, ScannedProductItem } from '@/components/pos/BarcodeScannerModal'
 import { ReceiptModal, ReceiptData } from '@/components/pos/ReceiptModal'
-import { getDb, saveOfflineSaleAtomic } from '@/lib/db'
+import { getDb, saveOfflineSaleAtomic, findBarcodeOffline } from '@/lib/db'
 import { useSyncManager } from '@/hooks/useSyncManager'
 
 // ── Types ────────────────────────────────────────────────────────
@@ -340,6 +341,136 @@ export default function POSTerminalPage() {
       return [...prevCart, newItem]
     })
   }, [])
+
+  // ── Lookup barcode / SKU / IMEI and add to cart (Hardware & Search) ───
+  const scanAndAddToCart = useCallback(
+    async (codeToScan: string) => {
+      const clean = codeToScan.trim()
+      if (!clean) return
+
+      // 1. Check in-memory products
+      const cleanLower = clean.toLowerCase()
+      const inMemoryMatch = products.find((p) => {
+        const matchesSku = p.sku.toLowerCase() === cleanLower
+        const matchesBarcode = p.barcodes.some((b) => b.barcode === clean)
+        const matchesImei = p.imei1 === clean || p.imei2 === clean
+        const matchesVariant = p.variants.some(
+          (v) => v.sku.toLowerCase() === cleanLower || v.barcodes.some((b) => b.barcode === clean)
+        )
+        return matchesSku || matchesBarcode || matchesImei || matchesVariant
+      })
+
+      if (inMemoryMatch) {
+        const matchedVariant = inMemoryMatch.variants.find(
+          (v) => v.sku.toLowerCase() === cleanLower || v.barcodes.some((b) => b.barcode === clean)
+        )
+        handleScannedProduct({
+          matchType: matchedVariant ? 'variant' : 'product',
+          productId: inMemoryMatch.id,
+          variantId: matchedVariant?.id || null,
+          productName: inMemoryMatch.name,
+          variantName: matchedVariant?.name || null,
+          displayName: matchedVariant ? `${inMemoryMatch.name} (${matchedVariant.name})` : inMemoryMatch.name,
+          sku: matchedVariant ? matchedVariant.sku : inMemoryMatch.sku,
+          sellingPrice: matchedVariant ? (matchedVariant.sellingPrice || inMemoryMatch.sellingPrice) : inMemoryMatch.sellingPrice,
+          minSellingPrice: matchedVariant ? (matchedVariant.minSellingPrice || inMemoryMatch.minSellingPrice || 0) : (inMemoryMatch.minSellingPrice || 0),
+          quantity: matchedVariant ? matchedVariant.quantity : inMemoryMatch.quantity,
+          images: inMemoryMatch.images,
+          hasImei: inMemoryMatch.hasImei,
+          barcode: clean,
+        })
+        toast.success(`Scanned: ${inMemoryMatch.name}`)
+        setSearchQuery('')
+        return
+      }
+
+      // 2. Fetch from online barcode API
+      try {
+        const res = await fetch(`/api/products/barcode/${encodeURIComponent(clean)}`)
+        const json = await res.json()
+        if (res.ok && json.success && json.data) {
+          handleScannedProduct(json.data)
+          toast.success(`Scanned: ${json.data.displayName}`)
+          setSearchQuery('')
+          return
+        }
+      } catch (err) {
+        console.warn('Barcode online lookup error:', err)
+      }
+
+      // 3. Fallback: local IndexedDB offline lookup
+      try {
+        const localMatch = await findBarcodeOffline(clean)
+        if (localMatch) {
+          handleScannedProduct({
+            matchType: localMatch.variantId ? 'variant' : 'product',
+            productId: localMatch.productId,
+            variantId: localMatch.variantId || null,
+            productName: localMatch.productName,
+            variantName: localMatch.variantName || null,
+            displayName: localMatch.displayName,
+            sku: localMatch.sku,
+            sellingPrice: localMatch.sellingPrice,
+            minSellingPrice: localMatch.minSellingPrice || 0,
+            quantity: localMatch.quantity,
+            images: localMatch.images,
+            hasImei: localMatch.hasImei,
+            categoryName: localMatch.categoryName,
+            barcode: localMatch.barcode,
+          })
+          toast.success(`Scanned: ${localMatch.displayName}`)
+          setSearchQuery('')
+          return
+        }
+      } catch {}
+
+      toast.error(`Barcode / IMEI "${clean}" catalog mein nahi mila. Pehle Inventory se product add karein.`)
+    },
+    [products, handleScannedProduct]
+  )
+
+  // ── Global Hardware Barcode Scanner Listener ───────────────────
+  useEffect(() => {
+    let buffer = ''
+    let lastKeyTime = 0
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null
+      const isInput = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA'
+
+      // Allow typing in checkout inputs or modals without interference
+      if (isInput && activeEl?.getAttribute('data-barcode-search') !== 'true') {
+        return
+      }
+
+      const now = Date.now()
+
+      if (e.key === 'Enter') {
+        if (buffer.length >= 3 && now - lastKeyTime < 300) {
+          e.preventDefault()
+          const code = buffer.trim()
+          buffer = ''
+          scanAndAddToCart(code)
+        } else {
+          buffer = ''
+        }
+        return
+      }
+
+      if (e.key.length > 1) return
+
+      // Reset buffer if delay between keystrokes is too long (human typing)
+      if (now - lastKeyTime > 150) {
+        buffer = ''
+      }
+
+      buffer += e.key
+      lastKeyTime = now
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [scanAndAddToCart])
 
   // ── Cart Manipulations ───────────────────────────────────────
   const updateQuantity = (clientId: string, delta: number) => {
@@ -903,9 +1034,18 @@ export default function POSTerminalPage() {
               <div className="flex-1 relative">
                 <input
                   type="text"
+                  data-barcode-search="true"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search products by Name, SKU, or Barcode..."
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      if (searchQuery.trim()) {
+                        scanAndAddToCart(searchQuery.trim())
+                      }
+                    }
+                  }}
+                  placeholder="Scan Barcode / IMEI with scanner gun or type Name..."
                   className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm text-slate-900 placeholder-zinc-500 focus:outline-none focus:border-primary-500 transition"
                 />
                 <svg
