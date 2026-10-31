@@ -15,6 +15,7 @@ const CreateReturnSchema = z.object({
   saleId: z.string().min(1, 'Sale ID or Invoice Number is required'),
   reason: z.string().min(2, 'Return reason is required'),
   refundMethod: z.enum(['CASH', 'CARD', 'MOBILE_WALLET', 'BANK_TRANSFER', 'CREDIT', 'OTHER']).default('CASH'),
+  deductionAmount: z.number().min(0).default(0),
   items: z.array(ReturnItemInputSchema).min(1, 'At least one item must be returned'),
 })
 
@@ -168,14 +169,22 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // Apply Deduction Amount (Katoti / restocking fee)
+    const grossRefundAmount = totalRefundAmount
+    const deduction = Math.min(grossRefundAmount, Math.max(0, data.deductionAmount || 0))
+    const netRefundAmount = Math.max(0, grossRefundAmount - deduction)
+    const finalReason = deduction > 0
+      ? `${data.reason.trim()} [Deduction: ₨${deduction.toLocaleString()}]`
+      : data.reason.trim()
+
     // 3. Execute atomic return transaction
     const returnRecord = await prisma.$transaction(async tx => {
       // Create Return record
       const createdReturn = await tx.return.create({
         data: {
           saleId: sale.id,
-          reason: data.reason.trim(),
-          totalAmount: totalRefundAmount,
+          reason: finalReason,
+          totalAmount: netRefundAmount,
           refundMethod: data.refundMethod,
           createdBy: session.user.id,
           items: {
@@ -279,8 +288,10 @@ export async function POST(request: NextRequest) {
           after: {
             saleId: sale.id,
             saleNumber: sale.saleNumber,
-            refundAmount: totalRefundAmount,
-            reason: data.reason,
+            grossAmount: grossRefundAmount,
+            deductionAmount: deduction,
+            refundAmount: netRefundAmount,
+            reason: finalReason,
           },
         },
       })
@@ -292,7 +303,7 @@ export async function POST(request: NextRequest) {
     })
 
     return NextResponse.json(
-      apiSuccess(returnRecord, `Return of ₨${totalRefundAmount.toLocaleString()} processed successfully`),
+      apiSuccess(returnRecord, `Return of ₨${netRefundAmount.toLocaleString()} processed successfully`),
       { status: 201 }
     )
   } catch (err: any) {

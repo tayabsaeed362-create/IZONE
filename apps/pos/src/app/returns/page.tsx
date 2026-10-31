@@ -66,6 +66,7 @@ export default function ReturnsPage() {
   // Return form state
   const [returnReason, setReturnReason] = useState('')
   const [refundMethod, setRefundMethod] = useState<'CASH' | 'CARD' | 'MOBILE_WALLET' | 'CREDIT'>('CASH')
+  const [deductionAmount, setDeductionAmount] = useState<number>(0)
   const [returnSelections, setReturnSelections] = useState<
     Record<string, { quantity: number; isDamaged: boolean }>
   >({})
@@ -163,10 +164,13 @@ export default function ReturnsPage() {
     item => (returnSelections[item.id]?.quantity ?? 0) > 0
   ) ?? []
 
-  const totalRefund = selectedItemsToReturn.reduce((sum, item) => {
+  const grossRefund = selectedItemsToReturn.reduce((sum, item) => {
     const qty = returnSelections[item.id]?.quantity ?? 0
     return sum + (qty * item.unitPrice)
   }, 0)
+
+  const effectiveDeduction = Math.min(grossRefund, Math.max(0, deductionAmount || 0))
+  const netRefund = Math.max(0, grossRefund - effectiveDeduction)
 
   async function handleProcessReturn(e: React.FormEvent) {
     e.preventDefault()
@@ -187,6 +191,7 @@ export default function ReturnsPage() {
         saleId: lookedUpSale.id,
         reason: returnReason.trim(),
         refundMethod,
+        deductionAmount: effectiveDeduction,
         items: selectedItemsToReturn.map(item => ({
           saleItemId: item.id,
           quantity: returnSelections[item.id].quantity,
@@ -202,10 +207,11 @@ export default function ReturnsPage() {
 
       const data = await res.json()
       if (data.success) {
-        setSuccessMsg(`Return processed! ${formatCurrency(totalRefund)} refunded. Inventory updated.`)
+        setSuccessMsg(`Return processed! ${formatCurrency(netRefund)} refunded${effectiveDeduction > 0 ? ` (Deduction: ${formatCurrency(effectiveDeduction)})` : ''}. Inventory updated.`)
         setLookedUpSale(null)
         setReturnReason('')
         setInvoiceQuery('')
+        setDeductionAmount(0)
         fetchReturns()
         setTimeout(() => setSuccessMsg(''), 5000)
       } else {
@@ -422,11 +428,79 @@ export default function ReturnsPage() {
               </div>
             </div>
 
+            {/* Deduction Amount (Katoti / Restocking fee) */}
+            <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200/80 space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-amber-900">
+                    Deduction Amount / Katoti (PKR)
+                  </label>
+                  <p className="text-[11px] text-amber-700">
+                    Enter deduction / service fee (or 0 for 100% full refund)
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-600 font-mono">Rs</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max={grossRefund}
+                    value={deductionAmount || ''}
+                    placeholder="0"
+                    onChange={e => setDeductionAmount(Math.max(0, parseInt(e.target.value) || 0))}
+                    className="w-32 px-3 py-1.5 rounded-lg border border-amber-300 bg-white font-mono text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              </div>
+
+              {/* Quick Deduction Presets */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <span className="text-[11px] text-amber-800 font-semibold mr-1">Quick Select:</span>
+                <button
+                  type="button"
+                  onClick={() => setDeductionAmount(0)}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition ${
+                    deductionAmount === 0
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-white border border-amber-300 text-amber-900 hover:bg-amber-100'
+                  }`}
+                >
+                  Rs 0 (Full Refund)
+                </button>
+                {[5, 10, 15, 20].map(pct => {
+                  const cut = Math.round((grossRefund * pct) / 100)
+                  return (
+                    <button
+                      key={pct}
+                      type="button"
+                      onClick={() => setDeductionAmount(cut)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition ${
+                        deductionAmount === cut
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'bg-white border border-amber-300 text-amber-900 hover:bg-amber-100'
+                      }`}
+                    >
+                      {pct}% ({formatCurrency(cut)})
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
             {/* Refund banner */}
-            <div className="p-4 bg-slate-900 text-white rounded-xl flex items-center justify-between">
+            <div className="p-4 bg-slate-900 text-white rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <div className="text-xs text-slate-300">Total Refund Payable to Customer</div>
-                <div className="text-xl font-extrabold text-emerald-400">{formatCurrency(totalRefund)}</div>
+                <div className="text-xs text-slate-400 flex items-center gap-2">
+                  <span>Gross: {formatCurrency(grossRefund)}</span>
+                  {effectiveDeduction > 0 && (
+                    <>
+                      <span>•</span>
+                      <span className="text-amber-400 font-medium">Deduction: -{formatCurrency(effectiveDeduction)}</span>
+                    </>
+                  )}
+                </div>
+                <div className="text-xs text-slate-300 mt-0.5">Net Refund Payable to Customer</div>
+                <div className="text-2xl font-extrabold text-emerald-400">{formatCurrency(netRefund)}</div>
               </div>
               <div className="flex gap-2">
                 <button
@@ -439,9 +513,9 @@ export default function ReturnsPage() {
                 <button
                   type="submit"
                   disabled={submitting || selectedItemsToReturn.length === 0}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-sm disabled:opacity-50"
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-sm disabled:opacity-50"
                 >
-                  {submitting ? 'Processing...' : 'Confirm Return & Refund'}
+                  {submitting ? 'Processing...' : `Confirm Return & Pay ${formatCurrency(netRefund)}`}
                 </button>
               </div>
             </div>

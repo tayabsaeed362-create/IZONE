@@ -5,7 +5,8 @@ import Link from 'next/link'
 import {
   Users, Search, Plus, Phone, Calendar, ShoppingBag,
   ArrowRight, X, Clock, User, DollarSign, FileText,
-  Smartphone, ChevronRight, Hash, MapPin, Receipt, ArrowLeft, RotateCcw
+  Smartphone, ChevronRight, Hash, MapPin, Receipt, ArrowLeft, RotateCcw,
+  ShieldAlert, AlertCircle
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSession } from 'next-auth/react'
@@ -69,6 +70,110 @@ export default function CustomersPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [addForm, setAddForm] = useState({ name: '', phone: '', email: '', address: '', notes: '' })
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // ── Return Item & Deduction Modal in Customer History ───────
+  const [returnModalSale, setReturnModalSale] = useState<CustomerDetail['sales'][0] | null>(null)
+  const [returnSelections, setReturnSelections] = useState<Record<string, { quantity: number; isDamaged: boolean }>>({})
+  const [returnDeduction, setReturnDeduction] = useState<number>(0)
+  const [returnReason, setReturnReason] = useState<string>('Customer returned item')
+  const [returnRefundMethod, setReturnRefundMethod] = useState<'CASH' | 'CARD' | 'MOBILE_WALLET' | 'CREDIT'>('CASH')
+  const [returnSubmitting, setReturnSubmitting] = useState<boolean>(false)
+  const [returnError, setReturnError] = useState<string>('')
+
+  function handleOpenReturnModal(sale: CustomerDetail['sales'][0]) {
+    setReturnModalSale(sale)
+    setReturnError('')
+    setReturnDeduction(0)
+    setReturnReason('Customer returned item')
+    setReturnRefundMethod('CASH')
+    const initial: Record<string, { quantity: number; isDamaged: boolean }> = {}
+    sale.items.forEach((item, idx) => {
+      initial[item.id] = { quantity: idx === 0 ? item.quantity : 0, isDamaged: false }
+    })
+    setReturnSelections(initial)
+  }
+
+  function toggleReturnItem(itemId: string, maxQty: number) {
+    setReturnSelections(prev => {
+      const current = prev[itemId] || { quantity: 0, isDamaged: false }
+      const newQty = current.quantity > 0 ? 0 : maxQty
+      return { ...prev, [itemId]: { ...current, quantity: newQty } }
+    })
+  }
+
+  function setReturnItemQty(itemId: string, qty: number, maxQty: number) {
+    const validQty = Math.max(0, Math.min(qty, maxQty))
+    setReturnSelections(prev => ({
+      ...prev,
+      [itemId]: { ...(prev[itemId] || { isDamaged: false }), quantity: validQty },
+    }))
+  }
+
+  function toggleReturnDamaged(itemId: string) {
+    setReturnSelections(prev => ({
+      ...prev,
+      [itemId]: { ...(prev[itemId] || { quantity: 1 }), isDamaged: !prev[itemId]?.isDamaged },
+    }))
+  }
+
+  const selectedReturnItems = returnModalSale?.items.filter(
+    item => (returnSelections[item.id]?.quantity ?? 0) > 0
+  ) ?? []
+
+  const grossReturnAmount = selectedReturnItems.reduce((sum, item) => {
+    const qty = returnSelections[item.id]?.quantity ?? 0
+    return sum + (qty * item.unitPrice)
+  }, 0)
+
+  const effectiveCustomerDeduction = Math.min(grossReturnAmount, Math.max(0, returnDeduction || 0))
+  const netCustomerRefund = Math.max(0, grossReturnAmount - effectiveCustomerDeduction)
+
+  async function handleSubmitReturn(e: React.FormEvent) {
+    e.preventDefault()
+    if (!returnModalSale) return
+    if (selectedReturnItems.length === 0) {
+      setReturnError('Select at least one item to return')
+      return
+    }
+
+    setReturnSubmitting(true)
+    setReturnError('')
+    try {
+      const payload = {
+        saleId: returnModalSale.id,
+        reason: returnReason.trim() || 'Customer returned item',
+        refundMethod: returnRefundMethod,
+        deductionAmount: effectiveCustomerDeduction,
+        items: selectedReturnItems.map(item => ({
+          saleItemId: item.id,
+          quantity: returnSelections[item.id].quantity,
+          isDamaged: returnSelections[item.id].isDamaged,
+        })),
+      }
+
+      const res = await fetch('/api/returns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      const data = await res.json()
+      if (res.ok && data.success) {
+        toast.success(`Return of ${formatCurrency(netCustomerRefund)} processed!${effectiveCustomerDeduction > 0 ? ` (Deduction: ${formatCurrency(effectiveCustomerDeduction)})` : ''}`)
+        setReturnModalSale(null)
+        if (selectedCustomerId) {
+          openCustomerDetail(selectedCustomerId)
+        }
+        loadCustomers()
+      } else {
+        setReturnError(data.error?.message || data.error || 'Failed to process return')
+      }
+    } catch {
+      setReturnError('Network error while processing return')
+    } finally {
+      setReturnSubmitting(false)
+    }
+  }
 
   async function loadCustomers() {
     setLoading(true)
@@ -428,13 +533,15 @@ export default function CustomersPage() {
                             <div className="text-right flex items-center gap-2">
                               <span className="text-sm font-bold text-slate-900">{formatCurrency(sale.totalAmount)}</span>
                               {sale.status !== 'REFUNDED' && (
-                                <Link
-                                  href={`/returns?invoice=${encodeURIComponent(sale.saleNumber)}`}
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenReturnModal(sale)}
                                   className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 text-[11px] font-semibold flex items-center gap-1 transition"
+                                  title="Process Return & Refund"
                                 >
                                   <RotateCcw size={12} />
                                   <span>Return Item</span>
-                                </Link>
+                                </button>
                               )}
                             </div>
                           </div>
@@ -579,6 +686,240 @@ export default function CustomersPage() {
                 >
                   {isSubmitting ? 'Saving...' : 'Save Customer'}
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: PROCESS CUSTOMER RETURN WITH DEDUCTION ─────── */}
+      {returnModalSale && (
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-xl max-h-[92vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95">
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-amber-50/70 rounded-t-2xl">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-base shrink-0">
+                  <RotateCcw size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">
+                    Return Item & Refund — {returnModalSale.saleNumber}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Customer: <strong className="text-slate-700">{customerDetail?.name}</strong> • Bill Total: {formatCurrency(returnModalSale.totalAmount)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReturnModalSale(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitReturn} className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+              {returnError && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 flex items-center gap-2">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>{returnError}</span>
+                </div>
+              )}
+
+              {/* Items selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-2">
+                  Select Items and Quantities to Return:
+                </label>
+                <div className="space-y-2.5">
+                  {returnModalSale.items.map((item) => {
+                    const sel = returnSelections[item.id] || { quantity: 0, isDamaged: false }
+                    const isSelected = sel.quantity > 0
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`p-3 rounded-xl border transition-all ${
+                          isSelected
+                            ? 'border-blue-500 bg-blue-50/40'
+                            : 'border-slate-200 bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <label className="flex items-center gap-2.5 cursor-pointer flex-1">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleReturnItem(item.id, item.quantity)}
+                              className="w-4 h-4 text-blue-600 rounded"
+                            />
+                            <div>
+                              <div className="font-bold text-slate-900">{item.productName}</div>
+                              <div className="text-[11px] text-slate-400 font-mono">
+                                Purchased: {item.quantity} units @ {formatCurrency(item.unitPrice)}
+                                {item.imei && ` • IMEI: ${item.imei}`}
+                              </div>
+                            </div>
+                          </label>
+                          <div className="font-bold text-slate-800 text-right">
+                            {formatCurrency(sel.quantity * item.unitPrice)}
+                          </div>
+                        </div>
+
+                        {isSelected && (
+                          <div className="mt-2.5 pt-2.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-slate-600 font-medium">Return Qty:</span>
+                              <input
+                                type="number"
+                                min="1"
+                                max={item.quantity}
+                                value={sel.quantity}
+                                onChange={(e) => setReturnItemQty(item.id, parseInt(e.target.value) || 0, item.quantity)}
+                                className="w-16 px-2 py-1 rounded-lg border border-slate-300 bg-white font-mono text-center font-bold"
+                              />
+                              <span className="text-slate-400 text-[11px]">of {item.quantity}</span>
+                            </div>
+
+                            <label className="flex items-center gap-1.5 cursor-pointer bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 text-amber-900 text-[11px]">
+                              <input
+                                type="checkbox"
+                                checked={sel.isDamaged}
+                                onChange={() => toggleReturnDamaged(item.id)}
+                                className="w-3.5 h-3.5 text-amber-600 rounded"
+                              />
+                              <ShieldAlert size={12} className="text-amber-600" />
+                              <span className="font-medium">Damaged / Do Not Restock</span>
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Deduction Amount (Katoti) */}
+              <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-amber-900">
+                      Deduction Amount / Katoti (PKR)
+                    </label>
+                    <p className="text-[11px] text-amber-700">
+                      Enter deduction amount (0 or custom cut from refund)
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-600 font-mono">Rs</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max={grossReturnAmount}
+                      value={returnDeduction || ''}
+                      placeholder="0"
+                      onChange={(e) => setReturnDeduction(Math.max(0, parseInt(e.target.value) || 0))}
+                      className="w-32 px-3 py-1.5 rounded-lg border border-amber-300 bg-white font-mono text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[11px] text-amber-800 font-semibold mr-1">Quick Select:</span>
+                  <button
+                    type="button"
+                    onClick={() => setReturnDeduction(0)}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition ${
+                      returnDeduction === 0
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'bg-white border border-amber-300 text-amber-900 hover:bg-amber-100'
+                    }`}
+                  >
+                    Rs 0 (Full Refund)
+                  </button>
+                  {[5, 10, 15, 20].map((pct) => {
+                    const cut = Math.round((grossReturnAmount * pct) / 100)
+                    return (
+                      <button
+                        key={pct}
+                        type="button"
+                        onClick={() => setReturnDeduction(cut)}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition ${
+                          returnDeduction === cut
+                            ? 'bg-amber-600 text-white shadow-xs'
+                            : 'bg-white border border-amber-300 text-amber-900 hover:bg-amber-100'
+                        }`}
+                      >
+                        {pct}% ({formatCurrency(cut)})
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Refund Method & Reason */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Refund Method</label>
+                  <select
+                    value={returnRefundMethod}
+                    onChange={(e) => setReturnRefundMethod(e.target.value as any)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="CASH">Cash Refund</option>
+                    <option value="CARD">Debit / Credit Card</option>
+                    <option value="MOBILE_WALLET">Easypaisa / JazzCash</option>
+                    <option value="CREDIT">Store Credit</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Return Reason</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Defective / change of mind"
+                    value={returnReason}
+                    onChange={(e) => setReturnReason(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Calculation Summary & Submit */}
+              <div className="p-4 bg-slate-900 text-white rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4">
+                <div>
+                  <div className="text-xs text-slate-400 flex items-center gap-2">
+                    <span>Gross: {formatCurrency(grossReturnAmount)}</span>
+                    {effectiveCustomerDeduction > 0 && (
+                      <>
+                        <span>•</span>
+                        <span className="text-amber-400 font-medium">Deduction: -{formatCurrency(effectiveCustomerDeduction)}</span>
+                      </>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-300 mt-0.5">Net Refund Payable to Customer</div>
+                  <div className="text-2xl font-extrabold text-emerald-400">{formatCurrency(netCustomerRefund)}</div>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setReturnModalSale(null)}
+                    className="px-4 py-2 border border-slate-700 text-slate-300 hover:text-white rounded-xl font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={returnSubmitting || selectedReturnItems.length === 0}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold shadow-xs disabled:opacity-50"
+                  >
+                    {returnSubmitting ? 'Processing...' : `Confirm Return & Pay ${formatCurrency(netCustomerRefund)}`}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
